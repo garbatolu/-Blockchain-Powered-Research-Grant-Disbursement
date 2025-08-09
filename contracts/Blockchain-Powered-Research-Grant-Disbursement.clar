@@ -4,6 +4,8 @@
 (define-constant ERR-MILESTONE-NOT-FOUND (err u103))
 (define-constant ERR-ALREADY-REVIEWED (err u104))
 (define-constant ERR-INSUFFICIENT-REVIEWS (err u105))
+(define-constant ERR-MILESTONE-OVERDUE (err u106))
+(define-constant ERR-INVALID-DEADLINE (err u107))
 
 (define-data-var admin principal tx-sender)
 (define-data-var min-reviewers uint u3)
@@ -27,7 +29,8 @@
         amount: uint,
         status: (string-ascii 20),
         review-count: uint,
-        approved-count: uint
+        approved-count: uint,
+        deadline: uint
     }
 )
 
@@ -57,10 +60,11 @@
     )
 )
 
-(define-public (add-milestone (grant-id uint) (milestone-id uint) (description (string-ascii 256)) (amount uint))
+(define-public (add-milestone (grant-id uint) (milestone-id uint) (description (string-ascii 256)) (amount uint) (deadline uint))
     (let ((grant (unwrap! (map-get? grants { grant-id: grant-id }) ERR-GRANT-NOT-FOUND)))
         (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
         (asserts! (<= amount (get remaining-amount grant)) ERR-INVALID-AMOUNT)
+        (asserts! (> deadline stacks-block-height) ERR-INVALID-DEADLINE)
         (map-set milestones
             { grant-id: grant-id, milestone-id: milestone-id }
             {
@@ -68,7 +72,8 @@
                 amount: amount,
                 status: "PENDING",
                 review-count: u0,
-                approved-count: u0
+                approved-count: u0,
+                deadline: deadline
             }
         )
         (ok true)
@@ -92,7 +97,8 @@
                 amount: (get amount milestone),
                 status: (get status milestone),
                 review-count: (+ (get review-count milestone) u1),
-                approved-count: (if approved (+ (get approved-count milestone) u1) (get approved-count milestone))
+                approved-count: (if approved (+ (get approved-count milestone) u1) (get approved-count milestone)),
+                deadline: (get deadline milestone)
             }
         )
         (ok true)
@@ -114,7 +120,8 @@
                 amount: (get amount milestone),
                 status: "RELEASED",
                 review-count: (get review-count milestone),
-                approved-count: (get approved-count milestone)
+                approved-count: (get approved-count milestone),
+                deadline: (get deadline milestone)
             }
         )
         (map-set grants
@@ -135,6 +142,57 @@
     (begin
         (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
         (var-set admin new-admin)
+        (ok true)
+    )
+)
+
+(define-public (check-milestone-deadline (grant-id uint) (milestone-id uint))
+    (let ((milestone (unwrap! (map-get? milestones { grant-id: grant-id, milestone-id: milestone-id }) ERR-MILESTONE-NOT-FOUND)))
+        (if (and (< (get deadline milestone) stacks-block-height) (is-eq (get status milestone) "PENDING"))
+            (begin
+                (map-set milestones
+                    { grant-id: grant-id, milestone-id: milestone-id }
+                    {
+                        description: (get description milestone),
+                        amount: (get amount milestone),
+                        status: "OVERDUE",
+                        review-count: (get review-count milestone),
+                        approved-count: (get approved-count milestone),
+                        deadline: (get deadline milestone)
+                    }
+                )
+                (ok "OVERDUE")
+            )
+            (ok "ACTIVE")
+        )
+    )
+)
+
+(define-read-only (get-milestone-status (grant-id uint) (milestone-id uint))
+    (let ((milestone (unwrap! (map-get? milestones { grant-id: grant-id, milestone-id: milestone-id }) ERR-MILESTONE-NOT-FOUND)))
+        (if (and (< (get deadline milestone) stacks-block-height) (is-eq (get status milestone) "PENDING"))
+            (ok "OVERDUE")
+            (ok (get status milestone))
+        )
+    )
+)
+
+(define-public (extend-milestone-deadline (grant-id uint) (milestone-id uint) (new-deadline uint))
+    (let ((milestone (unwrap! (map-get? milestones { grant-id: grant-id, milestone-id: milestone-id }) ERR-MILESTONE-NOT-FOUND)))
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
+        (asserts! (> new-deadline stacks-block-height) ERR-INVALID-DEADLINE)
+        (asserts! (> new-deadline (get deadline milestone)) ERR-INVALID-DEADLINE)
+        (map-set milestones
+            { grant-id: grant-id, milestone-id: milestone-id }
+            {
+                description: (get description milestone),
+                amount: (get amount milestone),
+                status: (if (is-eq (get status milestone) "OVERDUE") "PENDING" (get status milestone)),
+                review-count: (get review-count milestone),
+                approved-count: (get approved-count milestone),
+                deadline: new-deadline
+            }
+        )
         (ok true)
     )
 )
