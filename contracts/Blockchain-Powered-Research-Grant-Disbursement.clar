@@ -6,19 +6,21 @@
 (define-constant ERR-INSUFFICIENT-REVIEWS (err u105))
 (define-constant ERR-MILESTONE-OVERDUE (err u106))
 (define-constant ERR-INVALID-DEADLINE (err u107))
+(define-constant ERR-GRANT-PAUSED (err u108))
 
 (define-data-var admin principal tx-sender)
 (define-data-var min-reviewers uint u3)
 (define-data-var review-threshold uint u2)
 
-(define-map grants 
-    { grant-id: uint } 
+(define-map grants
+    { grant-id: uint }
     {
         researcher: principal,
         total-amount: uint,
         remaining-amount: uint,
         milestone-count: uint,
-        status: (string-ascii 20)
+        status: (string-ascii 20),
+        paused: bool
     }
 )
 
@@ -52,7 +54,8 @@
                 total-amount: total-amount,
                 remaining-amount: total-amount,
                 milestone-count: milestone-count,
-                status: "ACTIVE"
+                status: "ACTIVE",
+                paused: false
             }
         )
         (var-set grant-nonce (+ grant-id u1))
@@ -110,6 +113,7 @@
         (milestone (unwrap! (map-get? milestones { grant-id: grant-id, milestone-id: milestone-id }) ERR-MILESTONE-NOT-FOUND))
         (grant (unwrap! (map-get? grants { grant-id: grant-id }) ERR-GRANT-NOT-FOUND))
     )
+        (asserts! (not (get paused grant)) ERR-GRANT-PAUSED)
         (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
         (asserts! (>= (get review-count milestone) (var-get min-reviewers)) ERR-INSUFFICIENT-REVIEWS)
         (asserts! (>= (get approved-count milestone) (var-get review-threshold)) ERR-INSUFFICIENT-REVIEWS)
@@ -131,7 +135,8 @@
                 total-amount: (get total-amount grant),
                 remaining-amount: (- (get remaining-amount grant) (get amount milestone)),
                 milestone-count: (get milestone-count grant),
-                status: (get status grant)
+                status: (get status grant),
+                paused: (get paused grant)
             }
         )
         (ok true)
@@ -191,6 +196,42 @@
                 review-count: (get review-count milestone),
                 approved-count: (get approved-count milestone),
                 deadline: new-deadline
+            }
+        )
+        (ok true)
+    )
+)
+
+(define-public (pause-grant (grant-id uint))
+    (let ((grant (unwrap! (map-get? grants { grant-id: grant-id }) ERR-GRANT-NOT-FOUND)))
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
+        (map-set grants
+            { grant-id: grant-id }
+            {
+                researcher: (get researcher grant),
+                total-amount: (get total-amount grant),
+                remaining-amount: (get remaining-amount grant),
+                milestone-count: (get milestone-count grant),
+                status: (get status grant),
+                paused: true
+            }
+        )
+        (ok true)
+    )
+)
+
+(define-public (unpause-grant (grant-id uint))
+    (let ((grant (unwrap! (map-get? grants { grant-id: grant-id }) ERR-GRANT-NOT-FOUND)))
+        (asserts! (is-eq tx-sender (var-get admin)) ERR-NOT-AUTHORIZED)
+        (map-set grants
+            { grant-id: grant-id }
+            {
+                researcher: (get researcher grant),
+                total-amount: (get total-amount grant),
+                remaining-amount: (get remaining-amount grant),
+                milestone-count: (get milestone-count grant),
+                status: (get status grant),
+                paused: false
             }
         )
         (ok true)
