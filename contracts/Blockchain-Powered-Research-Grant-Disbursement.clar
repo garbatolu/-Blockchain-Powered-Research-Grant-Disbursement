@@ -128,16 +128,18 @@
                 deadline: (get deadline milestone)
             }
         )
-        (map-set grants
-            { grant-id: grant-id }
-            {
-                researcher: (get researcher grant),
-                total-amount: (get total-amount grant),
-                remaining-amount: (- (get remaining-amount grant) (get amount milestone)),
-                milestone-count: (get milestone-count grant),
-                status: (get status grant),
-                paused: (get paused grant)
-            }
+        (let ((new-remaining (- (get remaining-amount grant) (get amount milestone))))
+            (map-set grants
+                { grant-id: grant-id }
+                {
+                    researcher: (get researcher grant),
+                    total-amount: (get total-amount grant),
+                    remaining-amount: new-remaining,
+                    milestone-count: (get milestone-count grant),
+                    status: (if (is-eq new-remaining u0) "COMPLETED" (get status grant)),
+                    paused: (get paused grant)
+                }
+            )
         )
         (ok true)
     )
